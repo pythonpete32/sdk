@@ -22,6 +22,7 @@ import {
   ProposalStatus,
   SortDirection,
   SubgraphVoteValues,
+  SubgraphVotingSettings,
   VoteProposalStep,
   VoteValues,
   VotingMode,
@@ -43,6 +44,7 @@ import {
   QueryAddresslistVotingMembers,
   QueryAddresslistVotingProposal,
   QueryAddresslistVotingProposals,
+  QueryAddresslistVotingSettings,
 } from "../../../src/addresslistVoting/internal/graphql-queries";
 
 describe("Client Address List", () => {
@@ -128,7 +130,7 @@ describe("Client Address List", () => {
           default:
             throw new Error(
               "Unexpected proposal creation step: " +
-              Object.keys(step).join(", "),
+                Object.keys(step).join(", "),
             );
         }
       }
@@ -211,7 +213,7 @@ describe("Client Address List", () => {
           default:
             throw new Error(
               "Unexpected execute proposal step: " +
-              Object.keys(step).join(", "),
+                Object.keys(step).join(", "),
             );
         }
       }
@@ -354,11 +356,11 @@ describe("Client Address List", () => {
         expect(typeof proposal.settings.minTurnout).toBe("number");
         expect(
           proposal.settings.minSupport >= 0 &&
-          proposal.settings.minSupport <= 1,
+            proposal.settings.minSupport <= 1,
         ).toBe(true);
         expect(
           proposal.settings.minTurnout >= 0 &&
-          proposal.settings.minTurnout <= 1,
+            proposal.settings.minTurnout <= 1,
         ).toBe(true);
         // token
         expect(typeof proposal.totalVotingWeight).toBe("number");
@@ -381,7 +383,7 @@ describe("Client Address List", () => {
       );
       mockedGraphQLRequest.mockUpCheck(graphqlClientMocked);
       graphqlClientMocked.request.mockResolvedValueOnce({
-        addresslistVotingProposal: {},
+        addresslistVotingProposal: null,
       });
 
       const proposalId = TEST_NON_EXISTING_ADDRESS + "_0x0";
@@ -427,8 +429,8 @@ describe("Client Address List", () => {
           skip: 0,
           sortBy: params.sortBy,
           where: {
-            executed: true
-          }
+            executed: true,
+          },
         },
       );
 
@@ -460,6 +462,16 @@ describe("Client Address List", () => {
       const client = new AddresslistVotingClient(ctxPlugin);
       const limit = 5;
       const address = TEST_ADDRESSLIST_DAO_ADDDRESS;
+
+      const graphqlClientMocked = mockedGraphQLRequest.getMockedInstance(
+        client.graphql.getClient(),
+      );
+
+      mockedGraphQLRequest.mockUpCheck(graphqlClientMocked);
+      graphqlClientMocked.request.mockResolvedValueOnce({
+        addresslistVotingProposals: [getMockedProposal()],
+      });
+
       const params: IProposalQueryParams = {
         limit,
         sortBy: ProposalSortBy.CREATED_AT,
@@ -468,6 +480,19 @@ describe("Client Address List", () => {
       };
       const proposals = await client.methods.getProposals(params);
 
+      expect(graphqlClientMocked.request).toHaveBeenCalledTimes(2);
+      expect(graphqlClientMocked.request).toHaveBeenCalledWith(
+        QueryAddresslistVotingProposals,
+        {
+          limit: params.limit,
+          direction: params.direction,
+          skip: 0,
+          sortBy: params.sortBy,
+          where: {
+            dao: address,
+          },
+        },
+      );
       expect(Array.isArray(proposals)).toBe(true);
       expect(proposals.length > 0 && proposals.length <= limit).toBe(true);
     });
@@ -477,6 +502,16 @@ describe("Client Address List", () => {
       const client = new AddresslistVotingClient(ctxPlugin);
       const limit = 5;
       const address = TEST_NON_EXISTING_ADDRESS;
+
+      const graphqlClientMocked = mockedGraphQLRequest.getMockedInstance(
+        client.graphql.getClient(),
+      );
+
+      mockedGraphQLRequest.mockUpCheck(graphqlClientMocked);
+      graphqlClientMocked.request.mockResolvedValueOnce({
+        addresslistVotingProposals: [],
+      });
+
       const params: IProposalQueryParams = {
         limit,
         sortBy: ProposalSortBy.CREATED_AT,
@@ -485,6 +520,19 @@ describe("Client Address List", () => {
       };
       const proposals = await client.methods.getProposals(params);
 
+      expect(graphqlClientMocked.request).toHaveBeenCalledTimes(2);
+      expect(graphqlClientMocked.request).toHaveBeenCalledWith(
+        QueryAddresslistVotingProposals,
+        {
+          limit: params.limit,
+          direction: params.direction,
+          skip: 0,
+          sortBy: params.sortBy,
+          where: {
+            dao: address,
+          },
+        },
+      );
       expect(Array.isArray(proposals)).toBe(true);
       expect(proposals.length === 0).toBe(true);
     });
@@ -509,9 +557,32 @@ describe("Client Address List", () => {
       const ctxPlugin = ContextPlugin.fromContext(ctx);
       const client = new AddresslistVotingClient(ctxPlugin);
 
+      const graphqlClientMocked = mockedGraphQLRequest.getMockedInstance(
+        client.graphql.getClient(),
+      );
+
+      const votingSettings: SubgraphVotingSettings = {
+        minDuration: "10",
+        supportThreshold: "1000",
+        minParticipation: "1000",
+        minProposerVotingPower: "1000",
+        votingMode: VotingMode.STANDARD,
+      };
+      mockedGraphQLRequest.mockUpCheck(graphqlClientMocked);
+      graphqlClientMocked.request.mockResolvedValueOnce({
+        addresslistVotingPlugin: votingSettings,
+      });
+
       const pluginAddress: string = TEST_ADDRESSLIST_PLUGIN_ADDRESS;
       const settings = await client.methods.getVotingSettings(pluginAddress);
 
+      expect(graphqlClientMocked.request).toHaveBeenCalledTimes(2);
+      expect(graphqlClientMocked.request).toHaveBeenCalledWith(
+        QueryAddresslistVotingSettings,
+        {
+          address: pluginAddress,
+        },
+      );
       expect(settings === null).toBe(false);
       if (settings) {
         expect(typeof settings.minDuration).toBe("number");
