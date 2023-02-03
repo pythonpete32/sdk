@@ -1,15 +1,13 @@
-// @ts-ignore
-declare const describe, it, beforeAll, afterAll, expect;
-
 // mocks need to be at the top of the imports
 import { mockedIPFSClient } from "../../mocks/aragon-sdk-ipfs";
+import * as mockedGraphQLRequest from "../../mocks/graphql-request";
 
 import * as ganacheSetup from "../../helpers/ganache-setup";
 import * as deployContracts from "../../helpers/deployContracts";
 
 import {
-  Client,
   AddresslistVotingClient,
+  Client,
   Context,
   ContextPlugin,
   ExecuteProposalStep,
@@ -23,8 +21,10 @@ import {
   ProposalSortBy,
   ProposalStatus,
   SortDirection,
+  SubgraphVoteValues,
   VoteProposalStep,
   VoteValues,
+  VotingMode,
 } from "../../../src";
 import { InvalidAddressOrEnsError } from "@aragon/sdk-common";
 import {
@@ -33,11 +33,17 @@ import {
   TEST_ADDRESSLIST_DAO_ADDDRESS,
   TEST_ADDRESSLIST_PLUGIN_ADDRESS,
   TEST_ADDRESSLIST_PROPOSAL_ID,
+  TEST_DAO_ADDRESS,
   TEST_INVALID_ADDRESS,
   TEST_NON_EXISTING_ADDRESS,
   TEST_WALLET_ADDRESS,
 } from "../constants";
 import { EthereumProvider, Server } from "ganache";
+import {
+  QueryAddresslistVotingMembers,
+  QueryAddresslistVotingProposal,
+  QueryAddresslistVotingProposals,
+} from "../../../src/addresslistVoting/internal/graphql-queries";
 
 describe("Client Address List", () => {
   let pluginAddress: string;
@@ -91,7 +97,9 @@ describe("Client Address List", () => {
         },
       };
 
-      const ipfsUri = await addresslistVotingClient.methods.pinMetadata(metadata);
+      const ipfsUri = await addresslistVotingClient.methods.pinMetadata(
+        metadata,
+      );
 
       const proposalParams: ICreateProposalParams = {
         pluginAddress,
@@ -120,7 +128,7 @@ describe("Client Address List", () => {
           default:
             throw new Error(
               "Unexpected proposal creation step: " +
-                Object.keys(step).join(", "),
+              Object.keys(step).join(", "),
             );
         }
       }
@@ -203,7 +211,7 @@ describe("Client Address List", () => {
           default:
             throw new Error(
               "Unexpected execute proposal step: " +
-                Object.keys(step).join(", "),
+              Object.keys(step).join(", "),
             );
         }
       }
@@ -232,21 +240,35 @@ describe("Client Address List", () => {
       const ctxPlugin = ContextPlugin.fromContext(ctx);
       const client = new AddresslistVotingClient(ctxPlugin);
 
+      const graphqlClientMocked = mockedGraphQLRequest.getMockedInstance(
+        client.graphql.getClient(),
+      );
+      mockedGraphQLRequest.mockUpCheck(graphqlClientMocked);
+      graphqlClientMocked.request.mockResolvedValueOnce({
+        addresslistVotingPlugin: {
+          members: [
+            { address: TEST_WALLET_ADDRESS },
+          ],
+        },
+      });
+
       const wallets = await client.methods.getMembers(
         TEST_ADDRESSLIST_PLUGIN_ADDRESS,
       );
 
       expect(Array.isArray(wallets)).toBe(true);
-      expect(wallets.length).toBeGreaterThan(0);
-      expect(typeof wallets[0]).toBe("string");
-      expect(wallets[0]).toMatch(/^0x[A-Fa-f0-9]{40}$/i);
+      expect(wallets.length).toBe(1);
+      expect(wallets[0]).toBe(TEST_WALLET_ADDRESS);
+      expect(graphqlClientMocked.request).toHaveBeenCalledTimes(2);
+      expect(graphqlClientMocked.request).toHaveBeenCalledWith(
+        QueryAddresslistVotingMembers,
+        { address: TEST_ADDRESSLIST_PLUGIN_ADDRESS },
+      );
     });
     it("Should fetch the given proposal", async () => {
       const ctx = new Context(contextParams);
       const ctxPlugin = ContextPlugin.fromContext(ctx);
       const client = new AddresslistVotingClient(ctxPlugin);
-
-      const proposalId = TEST_ADDRESSLIST_PROPOSAL_ID;
 
       mockedIPFSClient.cat.mockResolvedValue(
         Buffer.from(
@@ -262,12 +284,27 @@ describe("Client Address List", () => {
         ),
       );
 
-      const proposal = await client.methods.getProposal(proposalId);
+      const graphqlClientMocked = mockedGraphQLRequest.getMockedInstance(
+        client.graphql.getClient(),
+      );
+      mockedGraphQLRequest.mockUpCheck(graphqlClientMocked);
+      graphqlClientMocked.request.mockResolvedValueOnce({
+        addresslistVotingProposal: getMockedProposal(),
+      });
 
+      const proposal = await client.methods.getProposal(
+        TEST_ADDRESSLIST_PROPOSAL_ID,
+      );
+
+      expect(graphqlClientMocked.request).toHaveBeenCalledTimes(2);
+      expect(graphqlClientMocked.request).toHaveBeenCalledWith(
+        QueryAddresslistVotingProposal,
+        { proposalId: TEST_ADDRESSLIST_PROPOSAL_ID },
+      );
       expect(typeof proposal).toBe("object");
       expect(proposal === null).toBe(false);
       if (proposal) {
-        expect(proposal.id).toBe(proposalId);
+        expect(proposal.id).toBe(TEST_ADDRESSLIST_PROPOSAL_ID);
         expect(typeof proposal.id).toBe("string");
         expect(proposal.id).toMatch(/^0x[A-Fa-f0-9]{40}_0x[A-Fa-f0-9]{1,}$/i);
         expect(typeof proposal.dao.address).toBe("string");
@@ -317,11 +354,11 @@ describe("Client Address List", () => {
         expect(typeof proposal.settings.minTurnout).toBe("number");
         expect(
           proposal.settings.minSupport >= 0 &&
-            proposal.settings.minSupport <= 1,
+          proposal.settings.minSupport <= 1,
         ).toBe(true);
         expect(
           proposal.settings.minTurnout >= 0 &&
-            proposal.settings.minTurnout <= 1,
+          proposal.settings.minTurnout <= 1,
         ).toBe(true);
         // token
         expect(typeof proposal.totalVotingWeight).toBe("number");
@@ -339,17 +376,40 @@ describe("Client Address List", () => {
       const ctxPlugin = ContextPlugin.fromContext(ctx);
       const client = new AddresslistVotingClient(ctxPlugin);
 
+      const graphqlClientMocked = mockedGraphQLRequest.getMockedInstance(
+        client.graphql.getClient(),
+      );
+      mockedGraphQLRequest.mockUpCheck(graphqlClientMocked);
+      graphqlClientMocked.request.mockResolvedValueOnce({
+        addresslistVotingProposal: {},
+      });
+
       const proposalId = TEST_NON_EXISTING_ADDRESS + "_0x0";
       const proposal = await client.methods.getProposal(proposalId);
 
+      expect(graphqlClientMocked.request).toHaveBeenCalledTimes(2);
+      expect(graphqlClientMocked.request).toHaveBeenCalledWith(
+        QueryAddresslistVotingProposal,
+        { proposalId },
+      );
       expect(proposal === null).toBe(true);
     });
     it("Should get a list of proposals filtered by the given criteria", async () => {
       const ctx = new Context(contextParams);
       const ctxPlugin = ContextPlugin.fromContext(ctx);
       const client = new AddresslistVotingClient(ctxPlugin);
+
+      const graphqlClientMocked = mockedGraphQLRequest.getMockedInstance(
+        client.graphql.getClient(),
+      );
+
+      mockedGraphQLRequest.mockUpCheck(graphqlClientMocked);
+      graphqlClientMocked.request.mockResolvedValueOnce({
+        addresslistVotingProposals: [getMockedProposal()],
+      });
+
       const limit = 5;
-      const status = ProposalStatus.DEFEATED;
+      const status = ProposalStatus.EXECUTED;
       const params: IProposalQueryParams = {
         limit,
         sortBy: ProposalSortBy.CREATED_AT,
@@ -357,6 +417,20 @@ describe("Client Address List", () => {
         status,
       };
       const proposals = await client.methods.getProposals(params);
+
+      expect(graphqlClientMocked.request).toHaveBeenCalledTimes(2);
+      expect(graphqlClientMocked.request).toHaveBeenCalledWith(
+        QueryAddresslistVotingProposals,
+        {
+          limit: params.limit,
+          direction: params.direction,
+          skip: 0,
+          sortBy: params.sortBy,
+          where: {
+            executed: true
+          }
+        },
+      );
 
       expect(Array.isArray(proposals)).toBe(true);
       expect(proposals.length <= limit).toBe(true);
@@ -458,4 +532,44 @@ async function advanceBlocks(
   for (let i = 0; i < amountOfBlocks; i++) {
     await provider.send("evm_mine", []);
   }
+}
+
+function getMockedProposal() {
+  return {
+    metadata: "ipfs://QmQPeNsJPyVWPFDVHb77w8G42Fvo15z4bG2X8D2GhfbSXc",
+    id: TEST_ADDRESSLIST_PROPOSAL_ID,
+    dao: {
+      id: TEST_DAO_ADDRESS,
+      name: "testDAO",
+    },
+    creator: TEST_WALLET_ADDRESS,
+    creationBlockNumber: "1000",
+    executionBlockNumber: "1001",
+    actions: [
+      {
+        data: "0x1234",
+        to: TEST_WALLET_ADDRESS,
+        value: "10000",
+      },
+    ],
+    yes: "5",
+    no: "3",
+    abstain: "0",
+    supportThreshold: "100000",
+    minParticipation: "100000",
+    endDate: "1675413346",
+    startDate: "1675412346",
+    totalVotingPower: "8",
+    voters: [
+      {
+        voter: { address: TEST_WALLET_ADDRESS },
+        voteOption: SubgraphVoteValues.YES,
+      },
+    ],
+    createdAt: "1675412340",
+    executable: true,
+    executed: true,
+    executionDate: "1675413386",
+    votingMode: VotingMode.STANDARD,
+  };
 }
